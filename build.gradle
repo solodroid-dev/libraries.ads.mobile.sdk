@@ -19,9 +19,9 @@ subprojects { project ->
                     publications {
                         maven(MavenPublication) {
                             from project.components.release
-                            groupId = 'com.github.solodroid-dev.libraries.ads.mobile.sdk'
+                            groupId = 'com.github.solodroid-dev.mobile-ads-sdk'
                             artifactId = project.name
-                            version = '1.0.0-alpha05'
+                            version = '0.1.0-alpha001'
                         }
                     }
                 }
