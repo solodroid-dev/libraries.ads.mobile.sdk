@@ -5,7 +5,8 @@ import android.view.ViewGroup;
 import com.solodroid.ads.core.models.AdModel;
 
 public interface AdProvider {
-    void init(Activity activity, AdModel adModel);
+
+    void init(Activity activity, AdModel adModel, AdsManager.InitializationListener listener);
 
     // Banner
     void loadBanner(Activity activity, ViewGroup container, String adUnitId, AdInternalListener listener);
@@ -15,7 +16,7 @@ public interface AdProvider {
     void showInterstitial(Activity activity, AdInternalListener listener);
 
     // Native
-    void loadNative(Activity activity, ViewGroup container, String adUnitId, AdInternalListener listener);
+    void loadNative(Activity activity, ViewGroup container, String adUnitId, String style, AdInternalListener listener);
 
     // Rewarded
     void loadRewarded(Activity activity, String adUnitId, AdInternalListener listener);
@@ -25,7 +26,7 @@ public interface AdProvider {
     void loadAppOpen(Activity activity, String adUnitId, AdInternalListener listener);
     void showAppOpen(Activity activity, AdInternalListener listener);
 
-    //GDPR
+    // GDPR (Menggunakan default agar tidak wajib diimplementasi jaringan iklan yang tidak butuh GDPR)
     default void showPrivacyOptions(Activity activity) {}
     default boolean isPrivacyOptionsRequired(Activity activity) {
         return false;

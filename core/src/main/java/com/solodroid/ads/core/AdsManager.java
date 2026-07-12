@@ -37,50 +37,66 @@ public class AdsManager implements DefaultLifecycleObserver {
         this.adsPref = new AdsPrefManager(activity);
     }
 
-    public void init(Activity activity) {
+    // --- INTERFACE CALLBACK ---
+    public interface InitializationListener {
+        void onInitComplete();
+    }
+
+    public interface AdFinishedListener {
+        void onFinished();
+    }
+
+    // PERBAIKAN: Memecah callback Rewarded agar UX di MainActivity lebih baik
+    public interface RewardFinishedListener {
+        void onRewardEarned();
+        void onAdClosed();
+        void onAdFailed();
+    }
+
+    // HELPER: Adapter agar kita tidak perlu override metode kosong yang tidak dipakai
+    private abstract static class SimpleAdListener implements AdInternalListener {
+        @Override public void onAdLoaded() {}
+        @Override public void onAdFailed() {}
+        @Override public void onAdDismissed() {}
+        @Override public void onRewardEarned() {}
+    }
+
+    // --- INIT LOGIC ---
+    public void init(Activity activity, InitializationListener listener) {
         this.currentActivity = activity;
 
         activity.getApplication().registerActivityLifecycleCallbacks(new android.app.Application.ActivityLifecycleCallbacks() {
-            @Override
-            public void onActivityResumed(@NonNull Activity activity) {
-                currentActivity = activity;
-            }
-
-            @Override
-            public void onActivityPaused(@NonNull Activity activity) {
-            }
-
-            @Override
-            public void onActivityCreated(@NonNull Activity activity, Bundle bundle) {
-            }
-
-            @Override
-            public void onActivityStarted(@NonNull Activity activity) {
-            }
-
-            @Override
-            public void onActivityStopped(@NonNull Activity activity) {
-            }
-
-            @Override
-            public void onActivitySaveInstanceState(@NonNull Activity activity, @NonNull Bundle bundle) {
-            }
-
-            @Override
-            public void onActivityDestroyed(@NonNull Activity activity) {
+            @Override public void onActivityResumed(@NonNull Activity activity) { currentActivity = activity; }
+            @Override public void onActivityPaused(@NonNull Activity activity) {}
+            @Override public void onActivityCreated(@NonNull Activity activity, Bundle bundle) {}
+            @Override public void onActivityStarted(@NonNull Activity activity) {}
+            @Override public void onActivityStopped(@NonNull Activity activity) {}
+            @Override public void onActivitySaveInstanceState(@NonNull Activity activity, @NonNull Bundle bundle) {}
+            @Override public void onActivityDestroyed(@NonNull Activity activity) {
                 if (currentActivity == activity) currentActivity = null;
             }
         });
 
         AdModel ads = adsPref.getAdsData();
-        if (ads == null || !ads.isAdStatus()) return;
+        if (ads == null || !ads.isAdStatus()) {
+            if (listener != null) listener.onInitComplete();
+            return;
+        }
 
         mainProvider = getProviderInstance(ads.getMainAds());
-        if (mainProvider != null) mainProvider.init(activity, ads);
-
-        if (!ads.getBackupAds().equals("none")) {
-            backupProvider = getProviderInstance(ads.getBackupAds());
-            if (backupProvider != null) backupProvider.init(activity, ads);
+        if (mainProvider != null) {
+            mainProvider.init(activity, ads, new InitializationListener() {
+                @Override
+                public void onInitComplete() {
+                    if (!ads.getBackupAds().equals("none")) {
+                        backupProvider = getProviderInstance(ads.getBackupAds());
+                        if (backupProvider != null) backupProvider.init(activity, ads, null);
+                    }
+                    if (listener != null) listener.onInitComplete();
+                }
+            });
+        } else {
+            if (listener != null) listener.onInitComplete();
         }
 
         ProcessLifecycleOwner.get().getLifecycle().addObserver(this);
@@ -99,37 +115,21 @@ public class AdsManager implements DefaultLifecycleObserver {
         showAppOpen(currentActivity, () -> Log.d("AdsManager", "App Open dismissed on Return to App"));
     }
 
-    public interface AdFinishedListener {
-        void onFinished();
-    }
-
-    public interface RewardFinishedListener {
-        void onFinished(boolean rewardEarned);
-    }
-
     // --- INTERSTITIAL LOGIC ---
     public void loadInterstitial(Activity activity) {
         AdModel ads = adsPref.getAdsData();
-        if (ads == null || !ads.isAdStatus() || mainProvider == null) return;
+        if (ads == null || !ads.isAdStatus() || !ads.isInterstitialStatus() || mainProvider == null) return;
 
-        mainProvider.loadInterstitial(activity, ads.getMainInterstitialId(), new AdInternalListener() {
+        mainProvider.loadInterstitial(activity, ads.getMainInterstitialId(), new SimpleAdListener() {
             @Override
             public void onAdLoaded() {
                 isMainLoaded = true;
             }
 
             @Override
-            public void onAdDismissed() {
-            }
-
-            @Override
-            public void onRewardEarned() {
-            }
-
-            @Override
             public void onAdFailed() {
                 if (backupProvider != null) {
-                    backupProvider.loadInterstitial(activity, ads.getBackupInterstitialId(), new AdInternalListener() {
+                    backupProvider.loadInterstitial(activity, ads.getBackupInterstitialId(), new SimpleAdListener() {
                         @Override
                         public void onAdLoaded() {
                             isBackupLoaded = true;
@@ -138,14 +138,6 @@ public class AdsManager implements DefaultLifecycleObserver {
                         @Override
                         public void onAdFailed() {
                             isBackupLoaded = false;
-                        }
-
-                        @Override
-                        public void onAdDismissed() {
-                        }
-
-                        @Override
-                        public void onRewardEarned() {
                         }
                     });
                 }
@@ -183,19 +175,7 @@ public class AdsManager implements DefaultLifecycleObserver {
 
     private void showInterstitialProcess(Activity activity, AdFinishedListener callback) {
         isAdShowing = true;
-        AdInternalListener internalListener = new AdInternalListener() {
-            @Override
-            public void onAdLoaded() {
-            }
-
-            @Override
-            public void onAdFailed() {
-            }
-
-            @Override
-            public void onRewardEarned() {
-            }
-
+        SimpleAdListener internalListener = new SimpleAdListener() {
             @Override
             public void onAdDismissed() {
                 isAdShowing = false;
@@ -217,29 +197,21 @@ public class AdsManager implements DefaultLifecycleObserver {
         }
     }
 
-    // --- REWARDED LOGIC ---
+    // --- REWARDED LOGIC (DIPERBARUI) ---
     public void loadRewarded(Activity activity) {
         AdModel ads = adsPref.getAdsData();
-        if (ads == null || !ads.isAdStatus() || mainProvider == null) return;
+        if (ads == null || !ads.isAdStatus() || !ads.isRewardedStatus() || mainProvider == null) return;
 
-        mainProvider.loadRewarded(activity, ads.getMainRewardedId(), new AdInternalListener() {
+        mainProvider.loadRewarded(activity, ads.getMainRewardedId(), new SimpleAdListener() {
             @Override
             public void onAdLoaded() {
                 isMainRewardedLoaded = true;
             }
 
             @Override
-            public void onAdDismissed() {
-            }
-
-            @Override
-            public void onRewardEarned() {
-            }
-
-            @Override
             public void onAdFailed() {
                 if (backupProvider != null) {
-                    backupProvider.loadRewarded(activity, ads.getBackupRewardedId(), new AdInternalListener() {
+                    backupProvider.loadRewarded(activity, ads.getBackupRewardedId(), new SimpleAdListener() {
                         @Override
                         public void onAdLoaded() {
                             isBackupRewardedLoaded = true;
@@ -248,14 +220,6 @@ public class AdsManager implements DefaultLifecycleObserver {
                         @Override
                         public void onAdFailed() {
                             isBackupRewardedLoaded = false;
-                        }
-
-                        @Override
-                        public void onAdDismissed() {
-                        }
-
-                        @Override
-                        public void onRewardEarned() {
                         }
                     });
                 }
@@ -268,13 +232,12 @@ public class AdsManager implements DefaultLifecycleObserver {
         isAdShowing = true;
         final boolean[] isEarned = {false};
 
-        AdInternalListener internalListener = new AdInternalListener() {
-            @Override
-            public void onAdLoaded() {
-            }
-
+        SimpleAdListener internalListener = new SimpleAdListener() {
             @Override
             public void onAdFailed() {
+                isAdShowing = false;
+                callback.onAdFailed();
+                loadRewarded(activity);
             }
 
             @Override
@@ -285,7 +248,11 @@ public class AdsManager implements DefaultLifecycleObserver {
             @Override
             public void onAdDismissed() {
                 isAdShowing = false;
-                callback.onFinished(isEarned[0]);
+                if (isEarned[0]) {
+                    callback.onRewardEarned();
+                } else {
+                    callback.onAdClosed();
+                }
                 loadRewarded(activity);
             }
         };
@@ -298,7 +265,7 @@ public class AdsManager implements DefaultLifecycleObserver {
             isBackupRewardedLoaded = false;
         } else {
             isAdShowing = false;
-            callback.onFinished(false);
+            callback.onAdFailed();
             loadRewarded(activity);
         }
     }
@@ -306,20 +273,12 @@ public class AdsManager implements DefaultLifecycleObserver {
     // --- APP OPEN LOGIC ---
     public void loadAppOpen(Activity activity, AdInternalListener listener) {
         AdModel ads = adsPref.getAdsData();
-        if (ads == null || !ads.isAdStatus() || mainProvider == null) {
+        if (ads == null || !ads.isAdStatus() || !ads.isAppOpenStatus() || mainProvider == null) {
             if (listener != null) listener.onAdFailed();
             return;
         }
 
-        mainProvider.loadAppOpen(activity, ads.getMainAppOpenId(), new AdInternalListener() {
-            @Override
-            public void onAdDismissed() {
-            }
-
-            @Override
-            public void onRewardEarned() {
-            }
-
+        mainProvider.loadAppOpen(activity, ads.getMainAppOpenId(), new SimpleAdListener() {
             @Override
             public void onAdLoaded() {
                 isMainAppOpenLoaded = true;
@@ -329,15 +288,7 @@ public class AdsManager implements DefaultLifecycleObserver {
             @Override
             public void onAdFailed() {
                 if (backupProvider != null) {
-                    backupProvider.loadAppOpen(activity, ads.getBackupAppOpenId(), new AdInternalListener() {
-                        @Override
-                        public void onAdDismissed() {
-                        }
-
-                        @Override
-                        public void onRewardEarned() {
-                        }
-
+                    backupProvider.loadAppOpen(activity, ads.getBackupAppOpenId(), new SimpleAdListener() {
                         @Override
                         public void onAdLoaded() {
                             isBackupAppOpenLoaded = true;
@@ -365,19 +316,7 @@ public class AdsManager implements DefaultLifecycleObserver {
         }
 
         isAdShowing = true;
-        AdInternalListener internalListener = new AdInternalListener() {
-            @Override
-            public void onAdLoaded() {
-            }
-
-            @Override
-            public void onAdFailed() {
-            }
-
-            @Override
-            public void onRewardEarned() {
-            }
-
+        SimpleAdListener internalListener = new SimpleAdListener() {
             @Override
             public void onAdDismissed() {
                 isAdShowing = false;
@@ -399,27 +338,14 @@ public class AdsManager implements DefaultLifecycleObserver {
         }
     }
 
-    // --- REVISI: BANNER & NATIVE FALLBACK ---
+    // --- BANNER & NATIVE ---
     public void loadBanner(Activity activity, ViewGroup container) {
         AdModel ads = adsPref.getAdsData();
-        if (ads == null || !ads.isAdStatus() || mainProvider == null) return;
+        if (ads == null || !ads.isAdStatus() || !ads.isBannerStatus() || mainProvider == null) return;
 
-        mainProvider.loadBanner(activity, container, ads.getMainBannerId(), new AdInternalListener() {
-            @Override
-            public void onAdLoaded() {
-            }
-
-            @Override
-            public void onAdDismissed() {
-            }
-
-            @Override
-            public void onRewardEarned() {
-            }
-
+        mainProvider.loadBanner(activity, container, ads.getMainBannerId(), new SimpleAdListener() {
             @Override
             public void onAdFailed() {
-                // Panggil backup jika main provider gagal
                 if (backupProvider != null) {
                     backupProvider.loadBanner(activity, container, ads.getBackupBannerId(), null);
                 }
@@ -428,27 +354,18 @@ public class AdsManager implements DefaultLifecycleObserver {
     }
 
     public void loadNative(Activity activity, ViewGroup container) {
+        loadNative(activity, container, "medium");
+    }
+
+    public void loadNative(Activity activity, ViewGroup container, String style) {
         AdModel ads = adsPref.getAdsData();
-        if (ads == null || !ads.isAdStatus() || mainProvider == null) return;
+        if (ads == null || !ads.isAdStatus() || !ads.isNativeStatus() || mainProvider == null) return;
 
-        mainProvider.loadNative(activity, container, ads.getMainNativeId(), new AdInternalListener() {
-            @Override
-            public void onAdLoaded() {
-            }
-
-            @Override
-            public void onAdDismissed() {
-            }
-
-            @Override
-            public void onRewardEarned() {
-            }
-
+        mainProvider.loadNative(activity, container, ads.getMainNativeId(), style, new SimpleAdListener() {
             @Override
             public void onAdFailed() {
-                // Panggil backup jika main provider gagal
                 if (backupProvider != null) {
-                    backupProvider.loadNative(activity, container, ads.getBackupNativeId(), null);
+                    backupProvider.loadNative(activity, container, ads.getBackupNativeId(), style, null);
                 }
             }
         });

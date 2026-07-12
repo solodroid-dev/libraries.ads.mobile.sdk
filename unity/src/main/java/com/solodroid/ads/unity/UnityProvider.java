@@ -19,6 +19,7 @@ import com.unity3d.services.banners.UnityBannerSize;
 
 import com.solodroid.ads.core.AdInternalListener;
 import com.solodroid.ads.core.AdProvider;
+import com.solodroid.ads.core.AdsManager;
 import com.solodroid.ads.core.models.AdModel;
 
 import java.util.ArrayList;
@@ -44,8 +45,15 @@ public class UnityProvider implements AdProvider {
     private String loadedRewardedId = "";
 
     @Override
-    public void init(Activity activity, AdModel adModel) {
-        if (isInitialized || isInitializing) return;
+    public void init(Activity activity, AdModel adModel, AdsManager.InitializationListener listener) {
+        if (isInitialized) {
+            activity.runOnUiThread(() -> {
+                if (listener != null) listener.onInitComplete();
+            });
+            return;
+        }
+
+        if (isInitializing) return;
 
         String unityGameId = adModel.getMainAds().equals("unity")
                 ? adModel.getMainUnityGameId()
@@ -64,10 +72,13 @@ public class UnityProvider implements AdProvider {
                     isInitFailed = false;
                     Log.d(TAG, "Unity Ads is successfully initialized with ID: " + unityGameId);
 
-                    // Eksekusi antrean iklan yang tertunda
-                    List<Runnable> tasksCopy = new ArrayList<>(pendingTasks);
-                    pendingTasks.clear();
                     activity.runOnUiThread(() -> {
+                        // Jalankan callback utama agar SplashActivity bisa lanjut
+                        if (listener != null) listener.onInitComplete();
+
+                        // Eksekusi antrean iklan yang tertunda
+                        List<Runnable> tasksCopy = new ArrayList<>(pendingTasks);
+                        pendingTasks.clear();
                         for (Runnable task : tasksCopy) {
                             task.run();
                         }
@@ -80,15 +91,22 @@ public class UnityProvider implements AdProvider {
                     isInitFailed = true;
                     Log.e(TAG, "Unity Ads Failed to Initialize: " + message);
 
-                    // Batalkan antrean, kirim sinyal gagal ke semua request
-                    List<Runnable> tasksCopy = new ArrayList<>(pendingTasks);
-                    pendingTasks.clear();
                     activity.runOnUiThread(() -> {
+                        // Tetap panggil listener agar aplikasi tidak stuck di Splash
+                        if (listener != null) listener.onInitComplete();
+
+                        // Batalkan antrean, kirim sinyal gagal ke semua request
+                        List<Runnable> tasksCopy = new ArrayList<>(pendingTasks);
+                        pendingTasks.clear();
                         for (Runnable task : tasksCopy) {
                             task.run();
                         }
                     });
                 }
+            });
+        } else {
+            activity.runOnUiThread(() -> {
+                if (listener != null) listener.onInitComplete();
             });
         }
     }
@@ -124,34 +142,31 @@ public class UnityProvider implements AdProvider {
             @Override
             public void onBannerLoaded(BannerView banner) {
                 Log.d(TAG, "Unity Banner loaded");
-                container.addView(banner, layoutParams);
-                if (listener != null) listener.onAdLoaded();
+                activity.runOnUiThread(() -> {
+                    container.addView(banner, layoutParams);
+                    if (listener != null) listener.onAdLoaded();
+                });
             }
 
             @Override
             public void onBannerFailedToLoad(BannerView banner, BannerErrorInfo errorInfo) {
                 Log.e(TAG, "Unity Banner Failed: " + errorInfo.errorMessage);
-                if (listener != null) listener.onAdFailed();
+                activity.runOnUiThread(() -> {
+                    if (listener != null) listener.onAdFailed();
+                });
             }
 
-            @Override
-            public void onBannerClick(BannerView banner) {
-            }
-
-            @Override
-            public void onBannerLeftApplication(BannerView banner) {
-            }
-
-            @Override
-            public void onBannerShown(BannerView banner) {
-            }
+            @Override public void onBannerClick(BannerView banner) {}
+            @Override public void onBannerLeftApplication(BannerView banner) {}
+            @Override public void onBannerShown(BannerView banner) {}
         });
 
         bannerView.load();
     }
 
+    // PERBAIKAN: Menambahkan parameter "String style" agar tidak error "Method does not override"
     @Override
-    public void loadNative(Activity activity, ViewGroup container, String adUnitId, AdInternalListener listener) {
+    public void loadNative(Activity activity, ViewGroup container, String adUnitId, String style, AdInternalListener listener) {
         if (isInitFailed) {
             if (listener != null) listener.onAdFailed();
             return;
@@ -159,7 +174,7 @@ public class UnityProvider implements AdProvider {
 
         if (!isInitialized) {
             Log.d(TAG, "Native (MREC) load delayed. Waiting for Unity initialization...");
-            pendingTasks.add(() -> loadNative(activity, container, adUnitId, listener));
+            pendingTasks.add(() -> loadNative(activity, container, adUnitId, style, listener));
             return;
         }
 
@@ -176,6 +191,8 @@ public class UnityProvider implements AdProvider {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
         );
+
+        // Memakai style margin yang sama dengan native
         int marginLeft = activity.getResources().getDimensionPixelSize(R.dimen.ads_native_margin_left);
         int marginTop = activity.getResources().getDimensionPixelSize(R.dimen.ads_native_margin_top);
         int marginRight = activity.getResources().getDimensionPixelSize(R.dimen.ads_native_margin_right);
@@ -186,28 +203,24 @@ public class UnityProvider implements AdProvider {
         mrecView.setListener(new BannerView.IListener() {
             @Override
             public void onBannerLoaded(BannerView banner) {
-                Log.d(TAG, "Unity Native (MREC) loaded");
-                container.addView(banner, layoutParams);
-                if (listener != null) listener.onAdLoaded();
+                Log.d(TAG, "Unity Native (MREC fallback) loaded. Style parameter ignored.");
+                activity.runOnUiThread(() -> {
+                    container.addView(banner, layoutParams);
+                    if (listener != null) listener.onAdLoaded();
+                });
             }
 
             @Override
             public void onBannerFailedToLoad(BannerView banner, BannerErrorInfo errorInfo) {
                 Log.e(TAG, "Unity Native (MREC) Failed: " + errorInfo.errorMessage);
-                if (listener != null) listener.onAdFailed();
+                activity.runOnUiThread(() -> {
+                    if (listener != null) listener.onAdFailed();
+                });
             }
 
-            @Override
-            public void onBannerClick(BannerView banner) {
-            }
-
-            @Override
-            public void onBannerLeftApplication(BannerView banner) {
-            }
-
-            @Override
-            public void onBannerShown(BannerView banner) {
-            }
+            @Override public void onBannerClick(BannerView banner) {}
+            @Override public void onBannerLeftApplication(BannerView banner) {}
+            @Override public void onBannerShown(BannerView banner) {}
         });
 
         mrecView.load();
@@ -238,48 +251,56 @@ public class UnityProvider implements AdProvider {
             @Override
             public void onUnityAdsAdLoaded(String placementId) {
                 Log.d(TAG, "Unity Interstitial loaded: " + placementId);
-                isInterstitialReady = true;
-                if (listener != null) listener.onAdLoaded();
+                activity.runOnUiThread(() -> {
+                    isInterstitialReady = true;
+                    if (listener != null) listener.onAdLoaded();
+                });
             }
 
             @Override
             public void onUnityAdsFailedToLoad(String placementId, UnityAds.UnityAdsLoadError error, String message) {
                 Log.e(TAG, "Unity Interstitial failed: " + message);
-                isInterstitialReady = false;
-                if (listener != null) listener.onAdFailed();
+                activity.runOnUiThread(() -> {
+                    isInterstitialReady = false;
+                    if (listener != null) listener.onAdFailed();
+                });
             }
         });
     }
 
     @Override
     public void showInterstitial(Activity activity, AdInternalListener listener) {
-        if (isInterstitialReady && !loadedInterstitialId.isEmpty()) {
-            UnityAds.show(activity, loadedInterstitialId, new UnityAdsShowOptions(), new IUnityAdsShowListener() {
-                @Override
-                public void onUnityAdsShowFailure(String placementId, UnityAds.UnityAdsShowError error, String message) {
-                    Log.e(TAG, "Unity Interstitial show failure: " + message);
-                    isInterstitialReady = false;
-                    if (listener != null) listener.onAdDismissed();
-                }
+        activity.runOnUiThread(() -> {
+            if (isInterstitialReady && !loadedInterstitialId.isEmpty()) {
+                UnityAds.show(activity, loadedInterstitialId, new UnityAdsShowOptions(), new IUnityAdsShowListener() {
+                    @Override
+                    public void onUnityAdsShowFailure(String placementId, UnityAds.UnityAdsShowError error, String message) {
+                        Log.e(TAG, "Unity Interstitial show failure: " + message);
+                        activity.runOnUiThread(() -> {
+                            isInterstitialReady = false;
+                            if (listener != null) listener.onAdDismissed();
+                        });
+                    }
 
-                @Override
-                public void onUnityAdsShowStart(String placementId) {
-                }
+                    @Override
+                    public void onUnityAdsShowStart(String placementId) {}
 
-                @Override
-                public void onUnityAdsShowClick(String placementId) {
-                }
+                    @Override
+                    public void onUnityAdsShowClick(String placementId) {}
 
-                @Override
-                public void onUnityAdsShowComplete(String placementId, UnityAds.UnityAdsShowCompletionState state) {
-                    Log.d(TAG, "Unity Interstitial closed");
-                    isInterstitialReady = false;
-                    if (listener != null) listener.onAdDismissed();
-                }
-            });
-        } else {
-            if (listener != null) listener.onAdDismissed();
-        }
+                    @Override
+                    public void onUnityAdsShowComplete(String placementId, UnityAds.UnityAdsShowCompletionState state) {
+                        Log.d(TAG, "Unity Interstitial closed");
+                        activity.runOnUiThread(() -> {
+                            isInterstitialReady = false;
+                            if (listener != null) listener.onAdDismissed();
+                        });
+                    }
+                });
+            } else {
+                if (listener != null) listener.onAdDismissed();
+            }
+        });
     }
 
     @Override
@@ -307,62 +328,67 @@ public class UnityProvider implements AdProvider {
             @Override
             public void onUnityAdsAdLoaded(String placementId) {
                 Log.d(TAG, "Unity Rewarded loaded: " + placementId);
-                isRewardedReady = true;
-                if (listener != null) listener.onAdLoaded();
+                activity.runOnUiThread(() -> {
+                    isRewardedReady = true;
+                    if (listener != null) listener.onAdLoaded();
+                });
             }
 
             @Override
             public void onUnityAdsFailedToLoad(String placementId, UnityAds.UnityAdsLoadError error, String message) {
                 Log.e(TAG, "Unity Rewarded failed: " + message);
-                isRewardedReady = false;
-                if (listener != null) listener.onAdFailed();
+                activity.runOnUiThread(() -> {
+                    isRewardedReady = false;
+                    if (listener != null) listener.onAdFailed();
+                });
             }
         });
     }
 
     @Override
     public void showRewarded(Activity activity, AdInternalListener listener) {
-        if (isRewardedReady && !loadedRewardedId.isEmpty()) {
-            UnityAds.show(activity, loadedRewardedId, new UnityAdsShowOptions(), new IUnityAdsShowListener() {
-                @Override
-                public void onUnityAdsShowFailure(String placementId, UnityAds.UnityAdsShowError error, String message) {
-                    Log.e(TAG, "Unity Rewarded show failure: " + message);
-                    isRewardedReady = false;
-                    if (listener != null) listener.onAdDismissed();
-                }
-
-                @Override
-                public void onUnityAdsShowStart(String placementId) {
-                }
-
-                @Override
-                public void onUnityAdsShowClick(String placementId) {
-                }
-
-                @Override
-                public void onUnityAdsShowComplete(String placementId, UnityAds.UnityAdsShowCompletionState state) {
-                    isRewardedReady = false;
-
-                    // PERBAIKAN: Trigger onRewardEarned jika selesai
-                    if (state == UnityAds.UnityAdsShowCompletionState.COMPLETED) {
-                        if (listener != null) {
-                            listener.onRewardEarned();
-                            Log.d(TAG, "Unity Reward Earned");
-                        }
-                    } else {
-                        Log.d(TAG, "Unity Rewarded closed before completion");
+        activity.runOnUiThread(() -> {
+            if (isRewardedReady && !loadedRewardedId.isEmpty()) {
+                UnityAds.show(activity, loadedRewardedId, new UnityAdsShowOptions(), new IUnityAdsShowListener() {
+                    @Override
+                    public void onUnityAdsShowFailure(String placementId, UnityAds.UnityAdsShowError error, String message) {
+                        Log.e(TAG, "Unity Rewarded show failure: " + message);
+                        activity.runOnUiThread(() -> {
+                            isRewardedReady = false;
+                            if (listener != null) listener.onAdDismissed();
+                        });
                     }
 
-                    // PERBAIKAN: WAJIB panggil onAdDismissed agar AdsManager tahu iklan sudah tertutup
-                    // dan mengeksekusi unlock konten ke Activity.
-                    if (listener != null) {
-                        listener.onAdDismissed();
+                    @Override
+                    public void onUnityAdsShowStart(String placementId) {}
+
+                    @Override
+                    public void onUnityAdsShowClick(String placementId) {}
+
+                    @Override
+                    public void onUnityAdsShowComplete(String placementId, UnityAds.UnityAdsShowCompletionState state) {
+                        activity.runOnUiThread(() -> {
+                            isRewardedReady = false;
+
+                            if (state == UnityAds.UnityAdsShowCompletionState.COMPLETED) {
+                                if (listener != null) {
+                                    listener.onRewardEarned();
+                                    Log.d(TAG, "Unity Reward Earned");
+                                }
+                            } else {
+                                Log.d(TAG, "Unity Rewarded closed before completion");
+                            }
+
+                            if (listener != null) {
+                                listener.onAdDismissed();
+                            }
+                        });
                     }
-                }
-            });
-        } else {
-            if (listener != null) listener.onAdDismissed();
-        }
+                });
+            } else {
+                if (listener != null) listener.onAdDismissed();
+            }
+        });
     }
 
     @Override
@@ -378,9 +404,7 @@ public class UnityProvider implements AdProvider {
     }
 
     @Override
-    public void showPrivacyOptions(Activity activity) {
-        // Form privasi biasanya ditangani menggunakan Google UMP
-    }
+    public void showPrivacyOptions(Activity activity) {}
 
     @Override
     public boolean isPrivacyOptionsRequired(Activity activity) {

@@ -29,6 +29,7 @@ import com.applovin.sdk.AppLovinSdkInitializationConfiguration;
 
 import com.solodroid.ads.core.AdInternalListener;
 import com.solodroid.ads.core.AdProvider;
+import com.solodroid.ads.core.AdsManager;
 import com.solodroid.ads.core.models.AdModel;
 
 public class AppLovinMaxProvider implements AdProvider {
@@ -44,17 +45,26 @@ public class AppLovinMaxProvider implements AdProvider {
 
     private boolean isInitialized = false;
 
-    // JEMBATAN LISTENER: Untuk menangkap listener dari metode show()
+    // JEMBATAN LISTENER
     private AdInternalListener interstitialShowListener;
     private AdInternalListener rewardedShowListener;
     private AdInternalListener appOpenShowListener;
 
     @Override
-    public void init(Activity activity, AdModel adModel) {
-        if (isInitialized) return;
+    public void init(Activity activity, AdModel adModel, AdsManager.InitializationListener listener) {
+        if (isInitialized) {
+            activity.runOnUiThread(() -> {
+                if (listener != null) listener.onInitComplete();
+            });
+            return;
+        }
 
         boolean isDebuggable = (activity.getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
-        String sdkKey = AppLovinSdk.getInstance(activity).getSdkKey();
+        //String sdkKey = AppLovinSdk.getInstance(activity).getSdkKey();
+        String sdkKey = adModel.getMainApplovinSdkKey();
+        if (sdkKey == null || sdkKey.isEmpty()) {
+            sdkKey = adModel.getBackupApplovinSdkKey();
+        }
 
         AppLovinSdkInitializationConfiguration initConfig = AppLovinSdkInitializationConfiguration.builder(sdkKey, activity)
                 .setMediationProvider(AppLovinMediationProvider.MAX)
@@ -67,6 +77,10 @@ public class AppLovinMaxProvider implements AdProvider {
             if (isDebuggable) {
                 // AppLovinSdk.getInstance(activity).showMediationDebugger();
             }
+
+            activity.runOnUiThread(() -> {
+                if (listener != null) listener.onInitComplete();
+            });
         });
     }
 
@@ -77,52 +91,42 @@ public class AppLovinMaxProvider implements AdProvider {
             return;
         }
 
-        MaxAdView adView = new MaxAdView(adUnitId, activity);
+        // AppLovin mensyaratkan inisialisasi view di UI Thread
+        activity.runOnUiThread(() -> {
+            MaxAdView adView = new MaxAdView(adUnitId, activity);
 
-        int heightPx = activity.getResources().getDimensionPixelSize(R.dimen.ads_banner_height_50);
-        adView.setLayoutParams(new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, heightPx));
+            int heightPx = activity.getResources().getDimensionPixelSize(R.dimen.ads_banner_height_50);
+            adView.setLayoutParams(new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, heightPx));
 
-        adView.setListener(new MaxAdViewAdListener() {
-            @Override
-            public void onAdLoaded(@NonNull MaxAd ad) {
-                Log.d(TAG, "Banner Loaded");
-                container.removeAllViews();
-                container.addView(adView);
-                if (listener != null) listener.onAdLoaded();
-            }
+            adView.setListener(new MaxAdViewAdListener() {
+                @Override
+                public void onAdLoaded(@NonNull MaxAd ad) {
+                    Log.d(TAG, "Banner Loaded");
+                    activity.runOnUiThread(() -> {
+                        container.removeAllViews();
+                        container.addView(adView);
+                        if (listener != null) listener.onAdLoaded();
+                    });
+                }
 
-            @Override
-            public void onAdLoadFailed(@NonNull String adUnitId, @NonNull MaxError error) {
-                Log.e(TAG, "Banner Failed: " + error.getMessage());
-                if (listener != null) listener.onAdFailed();
-            }
+                @Override
+                public void onAdLoadFailed(@NonNull String adUnitId, @NonNull MaxError error) {
+                    Log.e(TAG, "Banner Failed: " + error.getMessage());
+                    activity.runOnUiThread(() -> {
+                        if (listener != null) listener.onAdFailed();
+                    });
+                }
 
-            @Override
-            public void onAdDisplayFailed(@NonNull MaxAd ad, @NonNull MaxError error) {
-            }
+                @Override public void onAdDisplayFailed(@NonNull MaxAd ad, @NonNull MaxError error) {}
+                @Override public void onAdExpanded(MaxAd ad) {}
+                @Override public void onAdCollapsed(MaxAd ad) {}
+                @Override public void onAdDisplayed(MaxAd ad) {}
+                @Override public void onAdHidden(MaxAd ad) {}
+                @Override public void onAdClicked(MaxAd ad) {}
+            });
 
-            @Override
-            public void onAdExpanded(MaxAd ad) {
-            }
-
-            @Override
-            public void onAdCollapsed(MaxAd ad) {
-            }
-
-            @Override
-            public void onAdDisplayed(MaxAd ad) {
-            }
-
-            @Override
-            public void onAdHidden(MaxAd ad) {
-            }
-
-            @Override
-            public void onAdClicked(MaxAd ad) {
-            }
+            adView.loadAd();
         });
-
-        adView.loadAd();
     }
 
     @Override
@@ -132,121 +136,149 @@ public class AppLovinMaxProvider implements AdProvider {
             return;
         }
 
-        interstitialAd = new MaxInterstitialAd(adUnitId, activity);
-        interstitialAd.setListener(new MaxAdListener() {
-            @Override
-            public void onAdLoaded(MaxAd ad) {
-                Log.d(TAG, "Interstitial Loaded");
-                if (listener != null) listener.onAdLoaded();
-            }
-
-            @Override
-            public void onAdLoadFailed(String adUnitId, MaxError error) {
-                Log.e(TAG, "Interstitial Failed: " + error.getMessage());
-                interstitialAd = null;
-                if (listener != null) listener.onAdFailed();
-            }
-
-            @Override
-            public void onAdHidden(MaxAd ad) {
-                interstitialAd = null;
-                if (interstitialShowListener != null) {
-                    interstitialShowListener.onAdDismissed();
-                    interstitialShowListener = null;
+        activity.runOnUiThread(() -> {
+            interstitialAd = new MaxInterstitialAd(adUnitId, activity);
+            interstitialAd.setListener(new MaxAdListener() {
+                @Override
+                public void onAdLoaded(MaxAd ad) {
+                    Log.d(TAG, "Interstitial Loaded");
+                    activity.runOnUiThread(() -> {
+                        if (listener != null) listener.onAdLoaded();
+                    });
                 }
-            }
 
-            @Override
-            public void onAdDisplayFailed(MaxAd ad, MaxError error) {
-                Log.e(TAG, "Interstitial Display Failed: " + error.getMessage());
-                interstitialAd = null;
-                if (interstitialShowListener != null) {
-                    interstitialShowListener.onAdDismissed();
-                    interstitialShowListener = null;
+                @Override
+                public void onAdLoadFailed(String adUnitId, MaxError error) {
+                    Log.e(TAG, "Interstitial Failed: " + error.getMessage());
+                    activity.runOnUiThread(() -> {
+                        interstitialAd = null;
+                        if (listener != null) listener.onAdFailed();
+                    });
                 }
-            }
 
-            @Override
-            public void onAdDisplayed(MaxAd ad) {
-            }
+                @Override
+                public void onAdHidden(MaxAd ad) {
+                    activity.runOnUiThread(() -> {
+                        interstitialAd = null;
+                        if (interstitialShowListener != null) {
+                            interstitialShowListener.onAdDismissed();
+                            interstitialShowListener = null;
+                        }
+                    });
+                }
 
-            @Override
-            public void onAdClicked(MaxAd ad) {
-            }
+                @Override
+                public void onAdDisplayFailed(MaxAd ad, MaxError error) {
+                    Log.e(TAG, "Interstitial Display Failed: " + error.getMessage());
+                    activity.runOnUiThread(() -> {
+                        interstitialAd = null;
+                        if (interstitialShowListener != null) {
+                            interstitialShowListener.onAdDismissed();
+                            interstitialShowListener = null;
+                        }
+                    });
+                }
+
+                @Override public void onAdDisplayed(MaxAd ad) {}
+                @Override public void onAdClicked(MaxAd ad) {}
+            });
+
+            interstitialAd.loadAd();
         });
-
-        interstitialAd.loadAd();
     }
 
     @Override
     public void showInterstitial(Activity activity, AdInternalListener listener) {
-        if (interstitialAd != null && interstitialAd.isReady()) {
-            this.interstitialShowListener = listener; // Simpan listener show
-            interstitialAd.showAd();
-        } else {
-            if (listener != null) listener.onAdDismissed();
-        }
+        activity.runOnUiThread(() -> {
+            if (interstitialAd != null && interstitialAd.isReady()) {
+                this.interstitialShowListener = listener;
+                interstitialAd.showAd();
+            } else {
+                if (listener != null) listener.onAdDismissed();
+            }
+        });
     }
 
     @Override
-    public void loadNative(Activity activity, ViewGroup container, String adUnitId, AdInternalListener listener) {
+    public void loadNative(Activity activity, ViewGroup container, String adUnitId, String style, AdInternalListener listener) {
         if (adUnitId == null || adUnitId.equals("0") || adUnitId.isEmpty()) {
             if (listener != null) listener.onAdFailed();
             return;
         }
 
-        MaxNativeAdViewBinder binder = new MaxNativeAdViewBinder.Builder(R.layout.applovin_native_ads)
-                .setTitleTextViewId(R.id.ad_headline)
-                .setBodyTextViewId(R.id.ad_body)
-                .setCallToActionButtonId(R.id.ad_call_to_action)
-                .setIconImageViewId(R.id.ad_app_icon)
-                .setMediaContentViewGroupId(R.id.ad_media)
-                .setOptionsContentViewGroupId(R.id.ad_options_view)
-                .build();
+        activity.runOnUiThread(() -> {
+            int layoutResId;
+            String safeStyle = (style != null) ? style.toLowerCase() : "medium";
 
-        MaxNativeAdView maxNativeAdView = new MaxNativeAdView(binder, activity);
+            switch (safeStyle) {
+                case "small":
+                    layoutResId = R.layout.applovin_native_small;
+                    break;
+                case "large":
+                    layoutResId = R.layout.applovin_native_large;
+                    break;
+                case "medium":
+                default:
+                    layoutResId = R.layout.applovin_native_medium;
+                    break;
+            }
 
-        nativeAdLoader = new MaxNativeAdLoader(adUnitId, activity);
-        nativeAdLoader.setNativeAdListener(new MaxNativeAdListener() {
-            @Override
-            public void onNativeAdLoaded(MaxNativeAdView nativeAdView, MaxAd ad) {
-                Log.d(TAG, "Native Ad Loaded");
+            // Binder yang secara otomatis memasukkan ad ke layout kita
+            MaxNativeAdViewBinder binder = new MaxNativeAdViewBinder.Builder(layoutResId)
+                    .setTitleTextViewId(R.id.ad_headline)
+                    .setBodyTextViewId(R.id.ad_body)
+                    .setCallToActionButtonId(R.id.ad_call_to_action)
+                    .setIconImageViewId(R.id.ad_app_icon)
+                    .setMediaContentViewGroupId(R.id.ad_media)
+                    .setOptionsContentViewGroupId(R.id.ad_options_view)
+                    .build();
 
-                if (loadedNativeAd != null) {
-                    nativeAdLoader.destroy(loadedNativeAd);
+            MaxNativeAdView maxNativeAdView = new MaxNativeAdView(binder, activity);
+
+            nativeAdLoader = new MaxNativeAdLoader(adUnitId, activity);
+            nativeAdLoader.setNativeAdListener(new MaxNativeAdListener() {
+                @Override
+                public void onNativeAdLoaded(MaxNativeAdView nativeAdView, MaxAd ad) {
+                    Log.d(TAG, "Native Ad Loaded with style: " + safeStyle);
+                    activity.runOnUiThread(() -> {
+                        if (loadedNativeAd != null) {
+                            nativeAdLoader.destroy(loadedNativeAd);
+                        }
+                        loadedNativeAd = ad;
+
+                        int marginLeft = activity.getResources().getDimensionPixelSize(R.dimen.ads_native_margin_left);
+                        int marginTop = activity.getResources().getDimensionPixelSize(R.dimen.ads_native_margin_top);
+                        int marginRight = activity.getResources().getDimensionPixelSize(R.dimen.ads_native_margin_right);
+                        int marginBottom = activity.getResources().getDimensionPixelSize(R.dimen.ads_native_margin_bottom);
+
+                        ViewGroup.MarginLayoutParams params = new ViewGroup.MarginLayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.WRAP_CONTENT
+                        );
+                        params.setMargins(marginLeft, marginTop, marginRight, marginBottom);
+                        nativeAdView.setLayoutParams(params);
+
+                        container.removeAllViews();
+                        container.addView(nativeAdView);
+
+                        if (listener != null) listener.onAdLoaded();
+                    });
                 }
-                loadedNativeAd = ad;
 
-                int marginLeft = activity.getResources().getDimensionPixelSize(R.dimen.ads_native_margin_left);
-                int marginTop = activity.getResources().getDimensionPixelSize(R.dimen.ads_native_margin_top);
-                int marginRight = activity.getResources().getDimensionPixelSize(R.dimen.ads_native_margin_right);
-                int marginBottom = activity.getResources().getDimensionPixelSize(R.dimen.ads_native_margin_bottom);
+                @Override
+                public void onNativeAdLoadFailed(String adUnitId, MaxError error) {
+                    Log.e(TAG, "Native Ad Failed: " + error.getMessage());
+                    activity.runOnUiThread(() -> {
+                        if (listener != null) listener.onAdFailed();
+                    });
+                }
 
-                ViewGroup.MarginLayoutParams params = new ViewGroup.MarginLayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                );
-                params.setMargins(marginLeft, marginTop, marginRight, marginBottom);
-                nativeAdView.setLayoutParams(params);
+                @Override
+                public void onNativeAdClicked(MaxAd ad) {}
+            });
 
-                container.removeAllViews();
-                container.addView(nativeAdView);
-
-                if (listener != null) listener.onAdLoaded();
-            }
-
-            @Override
-            public void onNativeAdLoadFailed(String adUnitId, MaxError error) {
-                Log.e(TAG, "Native Ad Failed: " + error.getMessage());
-                if (listener != null) listener.onAdFailed();
-            }
-
-            @Override
-            public void onNativeAdClicked(MaxAd ad) {
-            }
+            nativeAdLoader.loadAd(maxNativeAdView);
         });
-
-        nativeAdLoader.loadAd(maxNativeAdView);
     }
 
     @Override
@@ -256,68 +288,77 @@ public class AppLovinMaxProvider implements AdProvider {
             return;
         }
 
-        rewardedAd = MaxRewardedAd.getInstance(adUnitId, activity);
-        rewardedAd.setListener(new MaxRewardedAdListener() {
-            @Override
-            public void onAdLoaded(MaxAd ad) {
-                Log.d(TAG, "Rewarded Loaded");
-                if (listener != null) listener.onAdLoaded();
-            }
-
-            @Override
-            public void onAdLoadFailed(String adUnitId, MaxError error) {
-                Log.e(TAG, "Rewarded Failed: " + error.getMessage());
-                rewardedAd = null;
-                if (listener != null) listener.onAdFailed();
-            }
-
-            @Override
-            public void onUserRewarded(MaxAd ad, MaxReward reward) {
-                Log.d(TAG, "Reward Earned (AppLovin MAX)");
-                if (rewardedShowListener != null) {
-                    rewardedShowListener.onRewardEarned();
+        activity.runOnUiThread(() -> {
+            rewardedAd = MaxRewardedAd.getInstance(adUnitId, activity);
+            rewardedAd.setListener(new MaxRewardedAdListener() {
+                @Override
+                public void onAdLoaded(MaxAd ad) {
+                    Log.d(TAG, "Rewarded Loaded");
+                    activity.runOnUiThread(() -> {
+                        if (listener != null) listener.onAdLoaded();
+                    });
                 }
-            }
 
-            @Override
-            public void onAdHidden(MaxAd ad) {
-                rewardedAd = null;
-                if (rewardedShowListener != null) {
-                    rewardedShowListener.onAdDismissed();
-                    rewardedShowListener = null;
+                @Override
+                public void onAdLoadFailed(String adUnitId, MaxError error) {
+                    Log.e(TAG, "Rewarded Failed: " + error.getMessage());
+                    activity.runOnUiThread(() -> {
+                        rewardedAd = null;
+                        if (listener != null) listener.onAdFailed();
+                    });
                 }
-            }
 
-            @Override
-            public void onAdDisplayFailed(MaxAd ad, MaxError error) {
-                Log.e(TAG, "Rewarded Display Failed: " + error.getMessage());
-                rewardedAd = null;
-                if (rewardedShowListener != null) {
-                    rewardedShowListener.onAdDismissed();
-                    rewardedShowListener = null;
+                @Override
+                public void onUserRewarded(MaxAd ad, MaxReward reward) {
+                    Log.d(TAG, "Reward Earned (AppLovin MAX)");
+                    activity.runOnUiThread(() -> {
+                        if (rewardedShowListener != null) {
+                            rewardedShowListener.onRewardEarned();
+                        }
+                    });
                 }
-            }
 
-            @Override
-            public void onAdDisplayed(MaxAd ad) {
-            }
+                @Override
+                public void onAdHidden(MaxAd ad) {
+                    activity.runOnUiThread(() -> {
+                        rewardedAd = null;
+                        if (rewardedShowListener != null) {
+                            rewardedShowListener.onAdDismissed();
+                            rewardedShowListener = null;
+                        }
+                    });
+                }
 
-            @Override
-            public void onAdClicked(MaxAd ad) {
-            }
+                @Override
+                public void onAdDisplayFailed(MaxAd ad, MaxError error) {
+                    Log.e(TAG, "Rewarded Display Failed: " + error.getMessage());
+                    activity.runOnUiThread(() -> {
+                        rewardedAd = null;
+                        if (rewardedShowListener != null) {
+                            rewardedShowListener.onAdDismissed();
+                            rewardedShowListener = null;
+                        }
+                    });
+                }
+
+                @Override public void onAdDisplayed(MaxAd ad) {}
+                @Override public void onAdClicked(MaxAd ad) {}
+            });
+
+            rewardedAd.loadAd();
         });
-
-        rewardedAd.loadAd();
     }
 
     @Override
     public void showRewarded(Activity activity, AdInternalListener listener) {
-        if (rewardedAd != null && rewardedAd.isReady()) {
-            this.rewardedShowListener = listener; // Simpan listener show
-            rewardedAd.showAd();
-        } else {
-            if (listener != null) listener.onAdDismissed();
-        }
+        activity.runOnUiThread(() -> {
+            if (rewardedAd != null && rewardedAd.isReady()) {
+                this.rewardedShowListener = listener;
+                rewardedAd.showAd();
+            } else {
+                if (listener != null) listener.onAdDismissed();
+            }
+        });
     }
 
     @Override
@@ -327,60 +368,67 @@ public class AppLovinMaxProvider implements AdProvider {
             return;
         }
 
-        appOpenAd = new MaxAppOpenAd(adUnitId, activity);
-        appOpenAd.setListener(new MaxAdListener() {
-            @Override
-            public void onAdLoaded(MaxAd ad) {
-                Log.d(TAG, "App Open Loaded");
-                if (listener != null) listener.onAdLoaded();
-            }
-
-            @Override
-            public void onAdLoadFailed(String adUnitId, MaxError error) {
-                Log.e(TAG, "App Open Failed: " + error.getMessage());
-                appOpenAd = null;
-                if (listener != null) listener.onAdFailed();
-            }
-
-            @Override
-            public void onAdHidden(MaxAd ad) {
-                appOpenAd = null;
-                if (appOpenShowListener != null) {
-                    appOpenShowListener.onAdDismissed();
-                    appOpenShowListener = null;
+        activity.runOnUiThread(() -> {
+            appOpenAd = new MaxAppOpenAd(adUnitId, activity);
+            appOpenAd.setListener(new MaxAdListener() {
+                @Override
+                public void onAdLoaded(MaxAd ad) {
+                    Log.d(TAG, "App Open Loaded");
+                    activity.runOnUiThread(() -> {
+                        if (listener != null) listener.onAdLoaded();
+                    });
                 }
-            }
 
-            @Override
-            public void onAdDisplayFailed(MaxAd ad, MaxError error) {
-                Log.e(TAG, "App Open Display Failed: " + error.getMessage());
-                appOpenAd = null;
-                if (appOpenShowListener != null) {
-                    appOpenShowListener.onAdDismissed();
-                    appOpenShowListener = null;
+                @Override
+                public void onAdLoadFailed(String adUnitId, MaxError error) {
+                    Log.e(TAG, "App Open Failed: " + error.getMessage());
+                    activity.runOnUiThread(() -> {
+                        appOpenAd = null;
+                        if (listener != null) listener.onAdFailed();
+                    });
                 }
-            }
 
-            @Override
-            public void onAdDisplayed(MaxAd ad) {
-            }
+                @Override
+                public void onAdHidden(MaxAd ad) {
+                    activity.runOnUiThread(() -> {
+                        appOpenAd = null;
+                        if (appOpenShowListener != null) {
+                            appOpenShowListener.onAdDismissed();
+                            appOpenShowListener = null;
+                        }
+                    });
+                }
 
-            @Override
-            public void onAdClicked(MaxAd ad) {
-            }
+                @Override
+                public void onAdDisplayFailed(MaxAd ad, MaxError error) {
+                    Log.e(TAG, "App Open Display Failed: " + error.getMessage());
+                    activity.runOnUiThread(() -> {
+                        appOpenAd = null;
+                        if (appOpenShowListener != null) {
+                            appOpenShowListener.onAdDismissed();
+                            appOpenShowListener = null;
+                        }
+                    });
+                }
+
+                @Override public void onAdDisplayed(MaxAd ad) {}
+                @Override public void onAdClicked(MaxAd ad) {}
+            });
+
+            appOpenAd.loadAd();
         });
-
-        appOpenAd.loadAd();
     }
 
     @Override
     public void showAppOpen(Activity activity, AdInternalListener listener) {
-        if (appOpenAd != null && appOpenAd.isReady()) {
-            this.appOpenShowListener = listener; // Simpan listener show
-            appOpenAd.showAd();
-        } else {
-            if (listener != null) listener.onAdDismissed();
-        }
+        activity.runOnUiThread(() -> {
+            if (appOpenAd != null && appOpenAd.isReady()) {
+                this.appOpenShowListener = listener;
+                appOpenAd.showAd();
+            } else {
+                if (listener != null) listener.onAdDismissed();
+            }
+        });
     }
 
     @Override

@@ -35,6 +35,12 @@ public class AdModel implements Serializable {
     private boolean appOpenStatus;
 
     // --- MAIN INITIALIZER KEYS ---
+    @SerializedName("mainAdmobAppId")
+    private String mainAdmobAppId;
+
+    @SerializedName("mainAdManagerAppId")
+    private String mainAdManagerAppId;
+
     @SerializedName("mainStartappAppId")
     private String mainStartappAppId;
 
@@ -64,6 +70,12 @@ public class AdModel implements Serializable {
     private String mainAppOpenId;
 
     // --- BACKUP INITIALIZER KEYS ---
+    @SerializedName("backupAdmobAppId")
+    private String backupAdmobAppId;
+
+    @SerializedName("backupAdManagerAppId")
+    private String backupAdManagerAppId;
+
     @SerializedName("backupStartappAppId")
     private String backupStartappAppId;
 
@@ -132,6 +144,14 @@ public class AdModel implements Serializable {
     }
 
     // Main Initializers
+    public String getMainAdmobAppId() {
+        return mainAdmobAppId;
+    }
+
+    public String getMainAdManagerAppId() {
+        return mainAdManagerAppId;
+    }
+
     public String getMainStartappAppId() {
         return mainStartappAppId;
     }
@@ -170,6 +190,14 @@ public class AdModel implements Serializable {
     }
 
     // Backup Initializers
+    public String getBackupAdmobAppId() {
+        return backupAdmobAppId;
+    }
+
+    public String getBackupAdManagerAppId() {
+        return backupAdManagerAppId;
+    }
+
     public String getBackupStartappAppId() {
         return backupStartappAppId;
     }
